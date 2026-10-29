@@ -12,6 +12,7 @@ import (
 	"github.com/oracle/oci-native-ingress-controller/pkg/auth"
 	"github.com/oracle/oci-native-ingress-controller/pkg/certificate"
 	"github.com/oracle/oci-native-ingress-controller/pkg/loadbalancer"
+	"github.com/oracle/oci-native-ingress-controller/pkg/metric"
 	ociclient "github.com/oracle/oci-native-ingress-controller/pkg/oci/client"
 	"github.com/oracle/oci-native-ingress-controller/pkg/util"
 	"github.com/oracle/oci-native-ingress-controller/pkg/waf"
@@ -34,9 +35,10 @@ type ClientProvider struct {
 	K8sClient           kubernetes.Interface
 	DefaultConfigGetter auth.ConfigGetter
 	Cache               cache.Store
+	ociMetrics          *metric.OCIMetrics
 }
 
-func New(k8sClient kubernetes.Interface, defaultConfigGetter auth.ConfigGetter) *ClientProvider {
+func New(k8sClient kubernetes.Interface, defaultConfigGetter auth.ConfigGetter, ociMetrics *metric.OCIMetrics) *ClientProvider {
 	return &ClientProvider{
 		k8sClient,
 		defaultConfigGetter,
@@ -47,6 +49,7 @@ func New(k8sClient kubernetes.Interface, defaultConfigGetter auth.ConfigGetter) 
 			}
 			return client.configGetter.GetKey(), nil
 		}, clientCacheExpiryTime),
+		ociMetrics,
 	}
 }
 
@@ -58,7 +61,7 @@ func (client *ClientProvider) GetClient(getter auth.ConfigGetter) (*WrapperClien
 	if exists {
 		return item.(*WrapperClient), nil
 	}
-	newWrapperClient, err := newWrapperClientFromConfig(getter, client.K8sClient)
+	newWrapperClient, err := newWrapperClientFromConfig(getter, client.K8sClient, client.ociMetrics)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +96,7 @@ func configureCertificatesClientsRetryPolicy(certBundleClient *certificates.Cert
 }
 
 // NewWrapperClient creates a new instance of WrapperClient with a ConfigGetter
-func newWrapperClientFromConfig(configGetter auth.ConfigGetter, k8sClient kubernetes.Interface) (*WrapperClient, error) {
+func newWrapperClientFromConfig(configGetter auth.ConfigGetter, k8sClient kubernetes.Interface, ociMetrics *metric.OCIMetrics) (*WrapperClient, error) {
 	configProvider, err := configGetter.GetConfigurationProvider()
 	if err != nil {
 		return nil, err
@@ -116,7 +119,7 @@ func newWrapperClientFromConfig(configGetter auth.ConfigGetter, k8sClient kubern
 	// Retry transient OCI Certificates throttling (HTTP 429) at the SDK client layer.
 	configureCertificatesClientsRetryPolicy(&ociCertificatesClient, &ociCertificatesMgmtClient)
 
-	privateIPClient, err := ociclient.NewPrivateIpClient(configProvider)
+	privateIPClient, err := ociclient.NewPrivateIpClient(configProvider, ociMetrics)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +133,12 @@ func newWrapperClientFromConfig(configGetter auth.ConfigGetter, k8sClient kubern
 	if err != nil {
 		return nil, err
 	}
+
+	ociLBClient.HTTPClient = ociMetrics.Wrap(ociLBClient.HTTPClient, "lb")
+	ociCertificatesClient.HTTPClient = ociMetrics.Wrap(ociCertificatesClient.HTTPClient, "certificates")
+	ociCertificatesMgmtClient.HTTPClient = ociMetrics.Wrap(ociCertificatesMgmtClient.HTTPClient, "certificates_management")
+	ociWafClient.HTTPClient = ociMetrics.Wrap(ociWafClient.HTTPClient, "waf")
+	containerEngineClient.HTTPClient = ociMetrics.Wrap(containerEngineClient.HTTPClient, "container_engine")
 
 	return &WrapperClient{
 		configGetter:          configGetter,

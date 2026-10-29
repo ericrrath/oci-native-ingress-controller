@@ -70,7 +70,7 @@ func SetUpControllers(opts types.IngressOpts, ingressClassInformer networkinginf
 	return func(ctx context.Context) {
 		klog.Info("Controller loop...")
 
-		client := setupClient(ctx, opts, k8client)
+		client := setupClient(ctx, opts, k8client, metric.NewOCIMetrics(reg))
 
 		wc, err := client.GetClient(client.DefaultConfigGetter)
 		if err != nil {
@@ -215,9 +215,9 @@ func getCluster(id string, client *containerengine.ContainerEngineClient) contai
 	return resp.Cluster
 }
 
-func setupClient(ctx context.Context, opts types.IngressOpts, k8client clientset.Interface) *client.ClientProvider {
+func setupClient(ctx context.Context, opts types.IngressOpts, k8client clientset.Interface, ociMetrics *metric.OCIMetrics) *client.ClientProvider {
 	configGetter := auth.DefaultOCIConfigGetter(ctx, opts, k8client)
-	return client.New(k8client, configGetter)
+	return client.New(k8client, configGetter, ociMetrics)
 }
 
 func SetupWebhookServer(ingressInformer networkinginformers.IngressInformer, serviceInformer v1.ServiceInformer, client *clientset.Clientset, ctx context.Context) {

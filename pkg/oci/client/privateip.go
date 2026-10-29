@@ -13,6 +13,7 @@ import (
 
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/core"
+	"github.com/oracle/oci-native-ingress-controller/pkg/metric"
 )
 
 const (
@@ -31,11 +32,13 @@ type PrivateIpClient struct {
 	privateIpClient *core.VirtualNetworkClient
 }
 
-func NewPrivateIpClient(configProvider common.ConfigurationProvider) (*PrivateIpClient, error) {
+func NewPrivateIpClient(configProvider common.ConfigurationProvider, ociMetrics *metric.OCIMetrics) (*PrivateIpClient, error) {
 	privateIpClient, err := core.NewVirtualNetworkClientWithConfigurationProvider(configProvider)
 	if err != nil {
 		return nil, err
 	}
+
+	privateIpClient.HTTPClient = ociMetrics.Wrap(privateIpClient.HTTPClient, "virtual_network")
 
 	return &PrivateIpClient{
 		privateIpClient: &privateIpClient,
